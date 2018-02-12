@@ -1,0 +1,46 @@
+---
+- name: Clean all previous subscriptions
+  command: subscription-manager clean
+  become: yes
+
+- name: Remove the host from the Red Hat Customer Portal
+  shell: curl -X DELETE -s -u '{{ rhsm_user }}:{{ rhsm_pass }}' -k "https://subscription.rhsm.redhat.com/subscription/consumers/{{ sysid.stdout }}"
+  args:
+    warn: no
+  become: yes
+  delegate_to: 127.0.0.1
+
+- name: Remove any old katello CA if present
+  shell: rpm -e $(rpm -qa|grep katello-ca-consumer) >/dev/null 2>&1 || true
+  args:
+    warn: no
+  ignore_errors: yes
+  become: yes
+
+- name: Install the Katello CA 
+  command: rpm -Uvh http://{{ rhs }}/pub/katello-ca-consumer-latest.noarch.rpm
+  args:
+    warn: no
+  ignore_errors: yes
+  become: yes
+
+- name: Register the host to RHS with activation key
+  shell: subscription-manager register --org="{{ org }}" --activationkey="{{ ak }}"
+  args:
+    warn: no
+  become: yes
+
+- name: Enable Red Hat Satellite Tools repo
+  command: subscription-manager repos --enable=rhel-\*-satellite-tools-\*-rpms
+  args:
+    warn: no
+  become: yes
+
+- name: Install Katello agent
+  shell: yum -y --disablerepo='*' --enablerepo='rhel-{{ ansible_distribution_major_version }}-server-satellite-tools-*-rpms,rhel-{{ ansible_distribution_major_version }}-server-rpms' install katello-agent
+  args:
+    warn: no
+  become: yes
+
+- name: Begin re-enabling the repositories required by the host
+  import_tasks: reenable-repos.yml

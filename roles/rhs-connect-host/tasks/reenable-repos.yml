@@ -1,0 +1,5 @@
+---
+- name: Reenable all Red Hat repos to match previous state
+  shell: subscription-manager repos --enable={{ item }}
+  become: yes
+  with_items: "{{ sm_repos_enabled.stdout_lines }}"

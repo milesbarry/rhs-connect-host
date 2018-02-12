@@ -1,0 +1,114 @@
+---
+- name: Check host is a RHEL virtual machine
+  fail: msg="Host is not a RHEL VMware guest"
+  when: not (ansible_distribution == 'RedHat' and ansible_virtualization_type == 'VMware')
+
+- name: Check hostname is not localhost.localdomain
+  fail: msg="Hostname is localhost.localdomain"
+  when: ansible_fqdn == "localhost.localdomain"
+
+- name: Find activation key to use for the version of RHEL
+  set_fact: 
+    ak: "{{ activation_key[ansible_distribution+ansible_distribution_major_version] }}"
+
+- name: Check API authentication to RH is working
+  shell: curl -X GET -s -k -u "{{ rhsm_user }}:{{ rhsm_pass }}" "https://subscription.rhsm.redhat.com/subscription/users/{{ rhsm_user }}/" | jq -r .id
+  args:
+    warn: no
+  run_once: true
+  delegate_to: 127.0.0.1
+  register: rhsm_check
+  failed_when: rhsm_check.stdout == "null"
+
+- name: Check API authentication to RHS is working
+  shell: curl -X GET -s -k -u {{ api_auth }} "https://{{ rhs }}/api/status" | jq -r .result
+  args:
+    warn: no
+  run_once: true
+  delegate_to: 127.0.0.1
+  register: api_check
+  failed_when: api_check.stdout != "ok"
+
+- name: Get ID from the organisation name
+  shell: curl -X GET -s -k -u {{ api_auth }} "https://{{ rhs }}/katello/api/organizations?search=name=\"{{ org }}\"" | jq -r .results[].id
+  args:
+    warn: no
+  run_once: true
+  delegate_to: 127.0.0.1
+  register: orgID
+  failed_when: orgID.stdout == ""
+
+- name: Get environment ID of Library
+  shell: curl -X GET -s -k -u {{ api_auth }}  "https://{{ rhs }}/katello/api/organizations/{{ orgID.stdout }}/environments?search=name=\"Library\"" | jq -r .results[].id
+  args:
+    warn: no
+  run_once: true
+  delegate_to: 127.0.0.1
+  register: envID 
+  failed_when: envID.stdout == ""
+
+- name: Check host is using Red Hat CDN
+  shell: grep 'cdn.redhat.com' /etc/rhsm/rhsm.conf
+  become: yes
+
+- name: Check host has entitlement certificates
+  shell: ls -1 /etc/pki/entitlement/*.pem >/dev/null 2>&1
+  become: yes
+
+- name: Get all RH repo ID's present on the RHS
+  shell: curl -X GET -s -k -u "{{ api_auth }}" "https://{{ rhs }}/katello/api/v2/repositories?environment_id={{ envID.stdout }}&organization_id={{ orgID.stdout }}&per_page=1000" | jq -r .results[].content_label | sort -u | grep -v null
+  args:
+    warn: no
+  run_once: true
+  register: rhcps
+  delegate_to: 127.0.0.1
+
+- name: Get current enabled Red Hat repos ID's on host
+  shell: subscription-manager repos --list-enabled | awk '/Repo ID:/{print $3}'
+  args:
+    warn: no
+  register: sm_repos_enabled
+  become: yes
+
+- name: Check all enabled repos on host are present on RHS
+  shell: echo "{{ sm_repos_enabled.stdout }}" | grep -F -x -v "{{ rhcps.stdout }}"
+  register: repos_missing
+  delegate_to: 127.0.0.1
+  ignore_errors: yes
+  failed_when: repos_missing is undefined
+
+- name: Output all missing repos
+  fail: msg={{ repos_missing.stdout_lines }}
+  when: repos_missing['rc'] == 0
+
+- name: Check machines hostname does not exist on the RHS
+  shell: curl -X GET -s -k -u "{{ api_auth }}" "https://{{ rhs }}/api/hosts?thin=true&per_page=10000" | jq -r .results[].name | sort | grep '^{{ ansible_fqdn }}$' 
+  args:
+    warn: no
+  register: rhs_hostnames
+  delegate_to: 127.0.0.1
+  failed_when: rhs_hostnames['rc'] == 0
+
+- name: Check if katello-agent is already installed on host
+  shell: rpm -q --qf "%{NAME}\n" katello-agent || true
+  args:
+    warn: no
+  register: katello
+  ignore_errors: yes
+
+- name: Check all required ports to RHS connect from host
+  shell: timeout {{ rhs_port_timeout }} bash -c "</dev/tcp/{{ rhs }}/{{ item }}"
+  with_items: "{{ rhs_ports }}"
+
+- name: Check if any qpid packages are installed on host (if katello is not installed)
+  shell: rpm -qa | grep qpid >/dev/null 2>&1
+  args:
+    warn: no
+  register: has_qpid
+  become: yes
+  failed_when: has_qpid['rc'] == 0
+  when: katello.stdout != "katello-agent"
+
+- name: Begin getting the hosts current configuration
+  import_tasks: get-current-configuration.yml
+  when: prechecks_only != true

@@ -1,0 +1,53 @@
+---
+- name: Get the systems current identity
+  command: subscription-manager identity
+  register: sm_identity
+  become: yes
+
+- name: Extract the system identity UUID
+  shell: echo -e "{{ sm_identity.stdout }}" | grep 'system identity' | awk '{print $NF}'
+  register: sysid
+
+- name: Get current configuration
+  command: subscription-manager config
+  register: sm_config
+  become: yes
+
+- name: Get consumed information
+  command: subscription-manager list --consumed
+  register: sm_consumed
+  become: yes
+
+- name: Get current repo configuration file
+  command: cat /etc/yum.repos.d/redhat.repo
+  register: sm_repo
+  become: yes
+
+- name: Get current disabled Red Hat repos
+  shell: subscription-manager repos --list-disabled | awk '/Repo ID:/{print $3}'
+  register: sm_repos_disabled
+  become: yes
+
+- name: Generate timestamp
+  command: 'date +%Y%m%d%H%M%S'
+  register: current_timestamp
+
+- name: Create hidden sm-history directory in /root
+  command: mkdir -m 600 -p /root/.sm-history/{{ current_timestamp['stdout'] }}
+  args:
+    warn: no
+  become: yes
+
+- name: Write files containing configrations to the sm-history directory
+  become: yes
+  copy: content="{{ vars[item.name]['stdout'] }}\n" dest="/root/.sm-history/{{ current_timestamp['stdout'] }}/{{ item.file }}"
+  with_items:
+    - { name: 'sm_identity', file: 'sm-identity' }
+    - { name: 'sm_config', file: 'sm-config' }
+    - { name: 'sm_consumed', file: 'sm-consumed' }
+    - { name: 'sm_repo', file: 'redhat.repo' }
+    - { name: 'sm_repos_enabled', file: 'sm-repos-enabled' }
+    - { name: 'sm_repos_disabled', file: 'sm-repos-disabled' }
+
+- name: Being registering the host to RHS
+  import_tasks: register-host.yml
