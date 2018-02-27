@@ -31,7 +31,7 @@ You'll need jq installed the machine you're running the playbook from.
 
 *Additionally you'll need your RHS API to support the listing of all [repo-ids] on the system.
 
-
+https://github.com/Katello/katello/commit/ee0fb7f14a04484afdbe91291d4e45adac114da1
 
 Configure the following variables:
 ```
