@@ -10,7 +10,7 @@ It will check the following before migrating a machine:
   - Machine is connected to Red Hat
   - Consumes content from Red Hat
   - Possess a Red Hat license
-  - That all enabled repos are present on Satellite*
+  - That all enabled repos are present on Satellite* **
   - The hostname doesn't already exist in Satellite
   - Check machine can reach all required Satellite ports
 
@@ -30,6 +30,7 @@ When migrating it will:
 You'll need jq installed the machine you're running the playbook from.
 
 *Additionally you'll need your RHS API to support the listing of all [repo-ids] on the system.
+** Red Hat say the required patch will be present in Satellite 6.3.1
 
 https://github.com/Katello/katello/commit/ee0fb7f14a04484afdbe91291d4e45adac114da1
 
